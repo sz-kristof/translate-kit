@@ -65,6 +65,14 @@ function(translatekit_add_engine engine_dir)
             "Then: scripts/apply-engine-patches.sh")
     endif()
 
+    # CMake 4 removed compatibility with cmake_minimum_required(VERSION < 3.5), which
+    # some vendored engine dependencies still declare (e.g. ruy's cpuinfo/deps/clog),
+    # so configuring fails outright on CMake 4 (e.g. the windows-latest runner). Let
+    # them run under 3.5 policies; patch 0012 forwards this to the external pcre2 build.
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.0 AND NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+    endif()
+
     # Engine build knobs (shared across platforms).
     set(SSPLIT_USE_INTERNAL_PCRE2 ON CACHE BOOL "" FORCE)  # build PCRE2 for the target
     set(COMPILE_TESTS OFF CACHE BOOL "" FORCE)
