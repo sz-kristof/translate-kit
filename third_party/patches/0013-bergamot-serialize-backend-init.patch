@@ -1,0 +1,34 @@
+diff --git a/inference/src/translator/translation_model.h b/inference/src/translator/translation_model.h
+--- a/inference/src/translator/translation_model.h
++++ b/inference/src/translator/translation_model.h
+@@ -1,6 +1,7 @@
+ #ifndef SRC_BERGAMOT_TRANSLATION_MODEL_H_
+ #define SRC_BERGAMOT_TRANSLATION_MODEL_H_
+ 
++#include <mutex>
+ #include <string>
+ #include <vector>
+ 
+@@ -141,6 +142,9 @@
+   /// Hold replicas of the backend (graph, scorers, shortlist) for use in each thread.
+   /// Controlled and consistent external access via graph(id), scorerEnsemble(id),
+   std::vector<MarianBackend> backend_;
++  /// Serializes the lazy per-worker loadBackend(): it clones the shared marian::Options,
++  /// whose YAML node is not safe to read from several threads at once.
++  std::mutex backendInitMutex_;
+   std::shared_ptr<QualityEstimator> qualityEstimator_;
+ 
+   void loadBackend(size_t idx);
+diff --git a/inference/src/translator/translation_model.cpp b/inference/src/translator/translation_model.cpp
+--- a/inference/src/translator/translation_model.cpp
++++ b/inference/src/translator/translation_model.cpp
+@@ -219,6 +219,9 @@
+   auto &backend = backend_[deviceId];
+ 
+   if (!backend.initialized) {
++    // Workers build their backend on first use, concurrently; loadBackend reads and
++    // clones the shared Options (not thread-safe, see common/options.h), so one at a time.
++    std::lock_guard<std::mutex> lock(backendInitMutex_);
+     loadBackend(deviceId);
+     backend.initialized = true;
+   }

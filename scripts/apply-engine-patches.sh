@@ -88,6 +88,15 @@
 #     The MSVC counterpart of 0002: drop /WX from marian's MSVC warning set. MSVC
 #     warns (C4068) on the `#pragma GCC` lines in tensors/cpu/prod_blas.h, which
 #     /WX turns into a hard error. Needed for the Windows target.
+#   0012-ssplit-pcre2-msvc
+#     ssplit's external pcre2 build under MSVC: build Release (the VS generator is
+#     multi-config), use pcre2's MSVC library name with PCRE2_STATIC, and forward
+#     the MSVC runtime choice and CMAKE_POLICY_VERSION_MINIMUM. Windows target.
+#   0013-bergamot-serialize-backend-init
+#     With num_workers > 1 every AsyncService worker lazily builds its backend on
+#     its first batch, and loadBackend() clones the shared marian::Options, which
+#     marian documents as not thread-safe. Serialize that one-time init with a
+#     mutex; translation itself stays parallel. All ABIs (multi-worker models).
 #
 # Patches 0002-0004 are needed to build the engine on modern compilers / macOS
 # (the Apple target); 0005-0006 are needed for the x86_64 ABI; 0008-0010 are
