@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "translate_kit/translate_kit.h"
+#include "utf8_args.h"
 
 // Find the first file in `dir` whose name starts with `prefix` and ends with
 // `suffix` (model bundles vary the middle, e.g. vocab.deen.spm).
@@ -45,25 +46,26 @@ static std::string FindFile(const std::string& dir, const std::string& prefix,
 }
 
 int main(int argc, char** argv) {
-    if (argc < 5) {
+    const std::vector<std::string> args = Utf8Args(argc, argv);
+    if (args.size() < 5) {
         std::fprintf(stderr,
                      "usage: %s <model-dir> <src> <tgt> [--html] \"text\"\n", argv[0]);
         return 2;
     }
-    const std::string dir = argv[1];
-    const std::string src = argv[2];
-    const std::string tgt = argv[3];
+    const std::string dir = args[1];
+    const std::string src = args[2];
+    const std::string tgt = args[3];
 
-    int argi = 4;
+    size_t argi = 4;
     bool isHtml = false;
-    if (std::string(argv[argi]) == "--html") {
+    if (args[argi] == "--html") {
         isHtml = true;
         ++argi;
     }
     std::string text;
-    for (; argi < argc; ++argi) {
+    for (; argi < args.size(); ++argi) {
         if (!text.empty()) text += ' ';
-        text += argv[argi];
+        text += args[argi];
     }
 
     const std::string model = FindFile(dir, "model.", ".bin");
