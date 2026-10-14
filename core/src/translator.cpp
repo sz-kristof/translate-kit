@@ -146,16 +146,18 @@ std::vector<TranslationResult> Translator::translateBatch(const std::vector<std:
     options.alignment = is_html;
 
     // Queue every input before waiting on any, so the batching pool sees all of
-    // their sentences at once and the workers can share them out.
-    std::vector<std::promise<mb::Response>> promises(inputs.size());
+    // their sentences at once and the workers can share them out. The callbacks
+    // share ownership of the promises: a worker may still be inside set_value()
+    // when this thread wakes up and returns.
+    auto promises = std::make_shared<std::vector<std::promise<mb::Response>>>(inputs.size());
     std::vector<std::future<mb::Response>> futures;
     futures.reserve(inputs.size());
-    for (auto& p : promises) futures.push_back(p.get_future());
+    for (auto& p : *promises) futures.push_back(p.get_future());
     for (size_t i = 0; i < inputs.size(); ++i) {
         std::string source = inputs[i];
         impl_->service.translate(
             impl_->model, std::move(source),
-            [&promises, i](mb::Response&& response) { promises[i].set_value(std::move(response)); },
+            [promises, i](mb::Response&& response) { (*promises)[i].set_value(std::move(response)); },
             options);
     }
 
