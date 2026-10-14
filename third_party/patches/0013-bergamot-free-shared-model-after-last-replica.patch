@@ -1,0 +1,40 @@
+diff --git a/inference/src/translator/translation_model.h b/inference/src/translator/translation_model.h
+--- a/inference/src/translator/translation_model.h
++++ b/inference/src/translator/translation_model.h
+@@ -1,6 +1,7 @@
+ #ifndef SRC_BERGAMOT_TRANSLATION_MODEL_H_
+ #define SRC_BERGAMOT_TRANSLATION_MODEL_H_
+ 
++#include <atomic>
+ #include <string>
+ #include <vector>
+ 
+@@ -141,6 +142,9 @@
+   /// Hold replicas of the backend (graph, scorers, shortlist) for use in each thread.
+   /// Controlled and consistent external access via graph(id), scorerEnsemble(id),
+   std::vector<MarianBackend> backend_;
++  /// How many replicas have built their backend; loadBackend() frees memory_.models
++  /// (shared by all replicas) only once the last one has.
++  std::atomic<size_t> backendsLoaded_{0};
+   std::shared_ptr<QualityEstimator> qualityEstimator_;
+ 
+   void loadBackend(size_t idx);
+diff --git a/inference/src/translator/translation_model.cpp b/inference/src/translator/translation_model.cpp
+--- a/inference/src/translator/translation_model.cpp
++++ b/inference/src/translator/translation_model.cpp
+@@ -114,7 +114,14 @@
+ 
+   // Similarly to the scorers, there is an extra copy of the model in the MemoryBundle. Since
+   // the ExpressionGraph is loaded, it is relatively safe to clear this memory.
+-  memory_.models.clear();
++  // translate-kit: but memory_ is shared by every replica, and with several AsyncService
++  // workers each replica is built lazily on its own first batch, often concurrently. Clearing
++  // here as soon as one replica is done freed the bytes while other workers were still
++  // copying weights out of them (use-after-free), and let two workers clear the same vector
++  // at once. Free it only after the last replica has loaded.
++  if (++backendsLoaded_ == backend_.size()) {
++    memory_.models.clear();
++  }
+ }
+ 
+ // Make request process is shared between Async and Blocking workflow of translating.
