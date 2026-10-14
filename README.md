@@ -162,6 +162,9 @@ C and C++ callers include `translate_kit/translate_kit.h`, define `TK_USING_DLL`
     [MarshalAs(UnmanagedType.LPUTF8Str)] string text, out LanguageResult result);
 [DllImport("translatekit")] static extern int tk_translate(IntPtr model,
     [MarshalAs(UnmanagedType.LPUTF8Str)] string input, int isHtml, out TranslationResult result);
+// inputs: UTF-8 strings from Marshal.StringToCoTaskMemUTF8; free each result with tk_translation_result_free
+[DllImport("translatekit")] static extern int tk_translate_batch(IntPtr model, IntPtr[] inputs,
+    UIntPtr count, int isHtml, [Out] TranslationResult[] results);
 ```
 
 Text that is not well-formed UTF-8 is repaired (ill-formed bytes become U+FFFD) before it reaches CLD2 or
@@ -173,22 +176,27 @@ engine to `/arch:AVX2` (marian's MSVC default) was ~20% *slower* than this porta
 
 ## Throughput: batches and workers
 
-`num_workers` in `tk_model_spec` is the number of translation threads for that model (each holds its
-own model replica). Requests are batched across sentences by the engine, so translate a page with
-**`tk_translate_batch`** rather than one `tk_translate` per paragraph. `core/test/bench_cli` measures
-both; Hungarian → English, 146 paragraphs (10,763 words) of the Hungarian Wikipedia article
-*Budapest*, Ryzen 9 5900X:
+`num_workers` in `tk_model_spec` is the number of translation threads for that model. Each worker
+holds its own model replica, so workers trade memory for speed. The engine batches sentences across
+all inputs of a call, so translate a page with **`tk_translate_batch`** rather than one `tk_translate`
+per paragraph.
 
-| workers | one `tk_translate` per paragraph | one `tk_translate_batch` |
-|--------:|---------------------------------:|-------------------------:|
-| 1 | 686 words/s | 933 words/s |
-| 2 | 686 words/s | 1,764 words/s |
-| 4 | 676 words/s | 2,778 words/s |
-| 8 | 665 words/s | **3,058 words/s** |
-| 12 | 660 words/s | 2,732 words/s |
+`core/test/bench_cli`, Hungarian → English, 146 paragraphs (10,763 words) of the Hungarian Wikipedia
+article *Budapest*, Ryzen 9 5900X (12 cores) on an ordinary, not idle, desktop. Median of 5 runs
+(range), after an untimed warm-up, one worker count per process:
 
-Per-paragraph calls can't use more than one thread, whatever `num_workers` says. Past ~8 workers
-the CPU's memory bandwidth, not its core count, is the limit.
+| workers | one `tk_translate` per paragraph | one `tk_translate_batch` | peak RAM |
+|--------:|---------------------------------:|-------------------------:|---------:|
+| 1 | 652 words/s | 875 (833–931) words/s | 185 MB |
+| 2 | 633 words/s | 1,187 (1,159–1,720) words/s | 274 MB |
+| 4 | 623 words/s | 1,838 (1,796–2,694) words/s | 512 MB |
+| 8 | 614 words/s | 2,105 (2,026–3,025) words/s | 982 MB |
+
+Batching alone is ~1.3× faster at no memory cost. Each extra worker costs ~120 MB with these models:
+4 workers give ~2.8× the per-paragraph throughput, 8 only ~15% more than 4 for twice the memory.
+Per-paragraph calls barely benefit from extra workers, since a paragraph is usually a single batch.
+The default stays `num_workers = 1` (also the Android and Apple wrappers' default), so existing callers
+get the same threads and memory as before.
 
 ## Coordinates
 

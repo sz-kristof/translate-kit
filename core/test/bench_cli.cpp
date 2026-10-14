@@ -15,7 +15,8 @@
  */
 
 // Throughput benchmark through the C ABI: one tk_translate per paragraph vs one
-// tk_translate_batch, at several worker counts.
+// tk_translate_batch, at several worker counts, after an untimed warm-up. Run one
+// worker count per process for a meaningful peak-memory figure.
 //
 //   bench_cli <model-dir> <src> <tgt> <paragraphs.txt> [--html] [workers...]
 //   bench_cli models/huen hu en budapest.txt 1 2 4 8
@@ -32,6 +33,35 @@
 #include <vector>
 
 #include "translate_kit/translate_kit.h"
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+#else
+#include <sys/resource.h>
+#endif
+
+// Peak resident memory of this process so far. Run one worker count per process
+// to attribute it to that configuration.
+static double PeakMemoryMB() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS pmc = {};
+    GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
+    return pmc.PeakWorkingSetSize / (1024.0 * 1024.0);
+#else
+    struct rusage ru = {};
+    getrusage(RUSAGE_SELF, &ru);
+#ifdef __APPLE__
+    return ru.ru_maxrss / (1024.0 * 1024.0);  // bytes
+#else
+    return ru.ru_maxrss / 1024.0;  // kilobytes
+#endif
+#endif
+}
 
 static std::string FindFile(const std::string& dir, const std::string& prefix, const std::string& suffix) {
     for (const auto& e : std::filesystem::directory_iterator(dir)) {
@@ -99,6 +129,18 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        std::vector<const char*> inputs;
+        for (const auto& p : paragraphs) inputs.push_back(p.c_str());
+        auto translate_all = [&] {
+            std::vector<tk_translation_result> rs(inputs.size());
+            tk_translate_batch(m, inputs.data(), inputs.size(), html ? 1 : 0, rs.data());
+            for (auto& r : rs) tk_translation_result_free(&r);
+        };
+
+        // Warm-up (untimed): every worker builds its model replica on its first
+        // batch; a whole-text batch reaches all of them.
+        translate_all();
+
         // one call per paragraph (what a caller without the batch API does)
         auto t0 = clock::now();
         for (const auto& p : paragraphs) {
@@ -109,16 +151,12 @@ int main(int argc, char** argv) {
         const double single = secs(t0);
 
         // everything in one batch
-        std::vector<const char*> inputs;
-        for (const auto& p : paragraphs) inputs.push_back(p.c_str());
-        std::vector<tk_translation_result> rs(inputs.size());
         t0 = clock::now();
-        tk_translate_batch(m, inputs.data(), inputs.size(), html ? 1 : 0, rs.data());
+        translate_all();
         const double batch = secs(t0);
-        for (auto& r : rs) tk_translation_result_free(&r);
 
-        std::printf("workers %2d | per-paragraph %6.2f s (%5.0f words/s) | batch %6.2f s (%5.0f words/s)\n",
-                    workers, single, words / single, batch, words / batch);
+        std::printf("workers %2d | per-paragraph %6.2f s (%5.0f words/s) | batch %6.2f s (%5.0f words/s) | peak RAM %4.0f MB\n",
+                    workers, single, words / single, batch, words / batch, PeakMemoryMB());
         tk_model_close(m);
     }
     tk_shutdown(ctx);
