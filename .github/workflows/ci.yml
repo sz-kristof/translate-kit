@@ -252,3 +252,6 @@ jobs:
             build/windows/translatekit.dll
             build/windows/translatekit.lib
             core/include/translate_kit/translate_kit.h
+            LICENSE
+            NOTICE
+            THIRD_PARTY_LICENSES.md
