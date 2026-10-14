@@ -39,9 +39,10 @@ struct TranslationResult {
     std::vector<float> quality_scores;  // empty unless requested/available
 };
 
-// Wraps the Bergamot engine for a single language pair. Phase A is a stub that
-// echoes input; Phase C loads the real model and drives BlockingService with
-// ResponseOptions{ html = true } for HTML-aware translation.
+// Wraps the Bergamot engine for a single language pair. Drives an AsyncService
+// with spec.num_workers worker threads (one model replica each); inputs submitted
+// together are batched across sentences by the engine. Without the engine it is a
+// stub that echoes input.
 class Translator {
 public:
     // Throws std::runtime_error on missing files or engine rejection.
@@ -50,6 +51,12 @@ public:
 
     // Translate one input. When `is_html`, inline tags are preserved/re-aligned.
     TranslationResult translate(const std::string& input, bool is_html) const;
+
+    // Translate several inputs in one go (same order as `inputs`). Much faster
+    // than one translate() per input: sentences from all inputs share batches and
+    // the batches are spread over the worker threads.
+    std::vector<TranslationResult> translateBatch(const std::vector<std::string>& inputs,
+                                                  bool is_html) const;
 
 private:
     struct Impl;

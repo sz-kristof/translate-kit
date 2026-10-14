@@ -188,7 +188,31 @@ TEST(CApi, TranslateEchoesInputInStub) {
     tk_model_close(model);
     tk_shutdown(ctx);
 }
+TEST(CApi, TranslateBatchEchoesInputsInStub) {
+    tk_context* ctx = MakeContext();
+    tk_model* model = LoadStubModel(ctx);
+
+    const char* inputs[] = {"uno", "dos <b>tres</b>"};
+    tk_translation_result r[2] = {};
+    EXPECT_EQ(tk_translate_batch(model, inputs, 2, /*is_html=*/1, r), TK_OK);
+    EXPECT_STREQ(r[0].text, "uno");
+    EXPECT_STREQ(r[1].text, "dos <b>tres</b>");
+    tk_translation_result_free(&r[0]);
+    tk_translation_result_free(&r[1]);
+
+    tk_model_close(model);
+    tk_shutdown(ctx);
+}
 #endif  // !TRANSLATEKIT_WITH_ENGINE
+
+TEST(CApi, TranslateBatchRejectsBadArgs) {
+    const char* inputs[] = {"x", nullptr};
+    tk_translation_result r[2] = {};
+    EXPECT_EQ(tk_translate_batch(nullptr, inputs, 1, 0, r), TK_ERR_INVALID_ARG);
+    EXPECT_EQ(tk_translate_batch(nullptr, nullptr, 1, 0, r), TK_ERR_INVALID_ARG);
+    EXPECT_EQ(tk_translate_batch(nullptr, inputs, 1, 0, nullptr), TK_ERR_INVALID_ARG);
+    EXPECT_EQ(r[0].text, nullptr);
+}
 
 #ifdef TRANSLATEKIT_WITH_ENGINE
 // Golden translation against a real tiny en->de model. Provide the extracted
@@ -380,6 +404,62 @@ TEST(CApi, LoadMultipleModelsInOneProcess) {
 
     tk_model_close(m1);
     tk_model_close(m2);
+    tk_shutdown(ctx);
+}
+
+// A batch on a multi-worker model must give, in order, exactly what translating
+// each input on its own gives (plain text and HTML).
+TEST(CApi, TranslateBatchMatchesSingleTranslations) {
+    const char* dir = std::getenv("TK_TEST_MODEL_DIR");
+    if (dir == nullptr || dir[0] == '\0') {
+        GTEST_SKIP() << "set TK_TEST_MODEL_DIR to the ende.student.tiny11 directory";
+    }
+    const std::string d(dir);
+    const std::string model = d + "/model.intgemm.alphas.bin";
+    const std::string vocab = d + "/vocab.deen.spm";
+    const std::string lex = d + "/lex.s2t.bin";
+    const std::string config = d + "/config.intgemm8bitalpha.yml";
+    const char* vocabs[] = {vocab.c_str()};
+
+    tk_context* ctx = MakeContext();
+    tk_model_spec spec = {};
+    spec.source_lang = "en";
+    spec.target_lang = "de";
+    spec.model_path = model.c_str();
+    spec.vocab_paths = vocabs;
+    spec.vocab_count = 1;
+    spec.shortlist_path = lex.c_str();
+    spec.config_path = config.c_str();
+    spec.num_workers = 4;
+    tk_model* m = nullptr;
+    ASSERT_EQ(tk_load_model(ctx, &spec, &m), TK_OK) << tk_last_error();
+
+    for (int is_html : {0, 1}) {
+        const char* inputs[] = {
+            "Hello World!",
+            "The weather is nice today. We are going to the park.",
+            "<p>Your <b>search history</b> stays on your device.</p>",
+            "Privacy should be the default on the web.",
+            "One more sentence, so that the batch is split across workers.",
+            "Good morning.",
+        };
+        constexpr size_t n = sizeof(inputs) / sizeof(inputs[0]);
+        tk_translation_result batch[n] = {};
+        ASSERT_EQ(tk_translate_batch(m, inputs, n, is_html, batch), TK_OK) << tk_last_error();
+        for (size_t i = 0; i < n; ++i) {
+            tk_translation_result single = {};
+            ASSERT_EQ(tk_translate(m, inputs[i], is_html, &single), TK_OK) << tk_last_error();
+            ASSERT_NE(batch[i].text, nullptr);
+            EXPECT_STREQ(batch[i].text, single.text) << "input " << i << " html=" << is_html;
+            tk_translation_result_free(&single);
+            tk_translation_result_free(&batch[i]);
+        }
+    }
+
+    tk_translation_result none = {};
+    EXPECT_EQ(tk_translate_batch(m, nullptr, 0, 0, &none), TK_OK);  // empty batch is fine
+
+    tk_model_close(m);
     tk_shutdown(ctx);
 }
 #endif  // TRANSLATEKIT_WITH_ENGINE

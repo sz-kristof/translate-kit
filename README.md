@@ -171,6 +171,25 @@ Measured on a Ryzen 9 5900X with the `ende.student.tiny11` test model, one worke
 (a 100-word paragraph in ~51 ms), model load ~44 ms, language detection ~13 µs. Pinning the whole
 engine to `/arch:AVX2` (marian's MSVC default) was ~20% *slower* than this portable build.
 
+## Throughput: batches and workers
+
+`num_workers` in `tk_model_spec` is the number of translation threads for that model (each holds its
+own model replica). Requests are batched across sentences by the engine, so translate a page with
+**`tk_translate_batch`** rather than one `tk_translate` per paragraph. `core/test/bench_cli` measures
+both; Hungarian → English, 146 paragraphs (10,763 words) of the Hungarian Wikipedia article
+*Budapest*, Ryzen 9 5900X:
+
+| workers | one `tk_translate` per paragraph | one `tk_translate_batch` |
+|--------:|---------------------------------:|-------------------------:|
+| 1 | 686 words/s | 933 words/s |
+| 2 | 686 words/s | 1,764 words/s |
+| 4 | 676 words/s | 2,778 words/s |
+| 8 | 665 words/s | **3,058 words/s** |
+| 12 | 660 words/s | 2,732 words/s |
+
+Per-paragraph calls can't use more than one thread, whatever `num_workers` says. Past ~8 workers
+the CPU's memory bandwidth, not its core count, is the limit.
+
 ## Coordinates
 
 **Android (Maven Central)**

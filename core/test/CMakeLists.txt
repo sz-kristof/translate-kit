@@ -49,4 +49,8 @@ if(TRANSLATEKIT_WITH_ENGINE)
     add_executable(translate_cli translate_cli.cpp)
     target_link_libraries(translate_cli PRIVATE translatekit_core)
     target_compile_definitions(translate_cli PRIVATE TRANSLATEKIT_WITH_ENGINE=1)
+
+    # Throughput benchmark: per-paragraph tk_translate vs tk_translate_batch.
+    add_executable(bench_cli bench_cli.cpp)
+    target_link_libraries(bench_cli PRIVATE translatekit_core)
 endif()
