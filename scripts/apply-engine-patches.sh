@@ -84,6 +84,10 @@
 #     x86-mach and topology branches already do. Needed for the iOS arm slices
 #     (device + arm64 simulator). Pair with -DCMAKE_SYSTEM_PROCESSOR=<arch> at
 #     configure (build-apple.sh), which is what makes cpuinfo enter the arm branch.
+#   0011-marian-msvc-drop-wx
+#     The MSVC counterpart of 0002: drop /WX from marian's MSVC warning set. MSVC
+#     warns (C4068) on the `#pragma GCC` lines in tensors/cpu/prod_blas.h, which
+#     /WX turns into a hard error. Needed for the Windows target.
 #
 # Patches 0002-0004 are needed to build the engine on modern compilers / macOS
 # (the Apple target); 0005-0006 are needed for the x86_64 ABI; 0008-0010 are

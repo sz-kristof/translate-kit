@@ -20,6 +20,8 @@
 #                       aarch64 host, e.g. Apple Silicon), hence the Linux runners here.
 #   - apple:            macOS (Apple Silicon) — builds the macOS + iOS-simulator slices and runs
 #                       the Swift goldens on both (`swift test` + an iOS-sim `xcodebuild test`).
+#   - windows:          x64 Windows (MSVC) — runs the core gtest goldens, then builds
+#                       translatekit.dll (static CRT) and runs the C-ABI smoke test against it.
 # Android arm64 is validated locally on an arm64 device/emulator (see C.5).
 
 name: CI
@@ -197,3 +199,56 @@ jobs:
             "$PWD/models/test-models/ende.student.tiny11"
           TRANSLATEKIT_LOCAL_XCFRAMEWORK=1 xcrun xcodebuild test -scheme TranslateKit \
             -destination "platform=iOS Simulator,id=$SIM_ID"
+
+  windows:
+    name: windows (MSVC x64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init engine submodules
+        run: |
+          git submodule update --init --checkout --recursive third_party/cld2
+          git submodule update --init --checkout third_party/translations
+          git -C third_party/translations submodule update --init --recursive \
+            inference/3rd_party/ssplit-cpp \
+            inference/marian-fork/src/3rd_party/sentencepiece \
+            inference/marian-fork/src/3rd_party/intgemm \
+            inference/marian-fork/src/3rd_party/ruy \
+            inference/marian-fork/src/3rd_party/simd_utils
+
+      - name: Apply engine patches
+        run: bash scripts/apply-engine-patches.sh
+
+      - name: Fetch test model
+        run: bash scripts/fetch-models.sh
+
+      - name: Core gtest (with real tiny en->de model)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul && set" | ForEach-Object {
+            if ($_ -match "^([^=]+)=(.*)$") { Set-Item -Path "env:$($matches[1])" -Value $matches[2] }
+          }
+          cmake -S core -B core/build-ci -G Ninja -DTRANSLATEKIT_BUILD_TESTS=ON -DTRANSLATEKIT_WITH_ENGINE=ON -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE) { exit 1 }
+          cmake --build core/build-ci
+          if ($LASTEXITCODE) { exit 1 }
+          $env:TK_TEST_MODEL_DIR = "$PWD/models/test-models/ende.student.tiny11"
+          ./core/build-ci/test/translatekit_core_test.exe
+          if ($LASTEXITCODE) { exit 1 }
+
+      - name: translatekit.dll + smoke test
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: translatekit-windows-x64
+          path: |
+            build/windows/translatekit.dll
+            build/windows/translatekit.lib
+            core/include/translate_kit/translate_kit.h

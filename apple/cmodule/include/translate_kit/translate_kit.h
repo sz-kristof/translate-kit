@@ -47,7 +47,13 @@ extern "C" {
 #endif
 
 #if defined(_WIN32)
-#  define TK_EXPORT __declspec(dllexport)
+   /* Building translatekit.dll, or linking the core statically: export.
+    * Consumers of the DLL define TK_USING_DLL to import instead. */
+#  if defined(TK_USING_DLL)
+#    define TK_EXPORT __declspec(dllimport)
+#  else
+#    define TK_EXPORT __declspec(dllexport)
+#  endif
 #else
 #  define TK_EXPORT __attribute__((visibility("default")))
 #endif

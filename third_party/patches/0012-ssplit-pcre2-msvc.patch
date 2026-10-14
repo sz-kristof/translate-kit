@@ -1,0 +1,41 @@
+diff --git a/inference/3rd_party/ssplit-cpp/cmake/FindPCRE2.cmake b/inference/3rd_party/ssplit-cpp/cmake/FindPCRE2.cmake
+--- a/inference/3rd_party/ssplit-cpp/cmake/FindPCRE2.cmake
++++ b/inference/3rd_party/ssplit-cpp/cmake/FindPCRE2.cmake
+@@ -98,8 +98,23 @@
+   endif(APPLE)
+ 
+ 
++  # The external project does not inherit the parent's MSVC runtime choice; a
++  # mismatch (/MT parent vs /MD pcre2) fails at link time (LNK2038).
++  if(MSVC AND CMAKE_MSVC_RUNTIME_LIBRARY)
++    LIST(APPEND PCRE2_CONFIGURE_OPTIONS
++      -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
++      "-DCMAKE_MSVC_RUNTIME_LIBRARY=${CMAKE_MSVC_RUNTIME_LIBRARY}")
++  endif()
++
+   # set include dirs and libraries for PCRE2
+-  set(PCRE2_LIBRARIES ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}pcre2-8${CMAKE_STATIC_LIBRARY_SUFFIX})
++  if(MSVC)
++    # pcre2's CMake names its MSVC static lib pcre2-8-static.lib, and consumers of
++    # a static pcre2 must define PCRE2_STATIC (else its API is declared dllimport).
++    set(PCRE2_LIBRARIES ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/pcre2-8-static.lib)
++    add_compile_definitions(PCRE2_STATIC)
++  else()
++    set(PCRE2_LIBRARIES ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}pcre2-8${CMAKE_STATIC_LIBRARY_SUFFIX})
++  endif()
+   set(PCRE2_INCLUDE_DIRS "${CMAKE_BINARY_DIR}/include")
+   set(PCRE2_FOUND TRUE CACHE BOOL "Found PCRE2 libraries" FORCE)
+   
+@@ -110,7 +125,11 @@
+     DOWNLOAD_DIR ${PCRE2_SRC_DIR}
+     SOURCE_DIR ${PCRE2_SRC_DIR}
+     CONFIGURE_COMMAND ${CMAKE_COMMAND} ${PCRE2_SRC_DIR} ${PCRE2_CONFIGURE_OPTIONS}
+-    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
++    # --config Release: with no -G the external project gets CMake's default
++    # generator, which on Windows is multi-config Visual Studio, where
++    # CMAKE_BUILD_TYPE is ignored and the build would otherwise default to Debug.
++    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release
++    INSTALL_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release --target install
+     INSTALL_DIR ${CMAKE_BINARY_DIR}
+     BUILD_BYPRODUCTS ${PCRE2_LIBRARIES})
+ 

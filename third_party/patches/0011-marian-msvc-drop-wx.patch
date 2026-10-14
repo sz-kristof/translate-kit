@@ -1,0 +1,12 @@
+diff --git a/inference/marian-fork/CMakeLists.txt b/inference/marian-fork/CMakeLists.txt
+--- a/inference/marian-fork/CMakeLists.txt
++++ b/inference/marian-fork/CMakeLists.txt
+@@ -209,7 +209,7 @@
+ # Set compilation flags
+ if(MSVC)
+ # These are used in src/CMakeLists.txt on a per-target basis
+-  list(APPEND ALL_WARNINGS /WX; /W4;)
++  list(APPEND ALL_WARNINGS /W4;)
+ 
+   # Disabled bogus warnings for CPU intrinsics:
+   # C4310: cast truncates constant value
