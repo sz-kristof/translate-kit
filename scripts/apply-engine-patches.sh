@@ -84,6 +84,22 @@
 #     x86-mach and topology branches already do. Needed for the iOS arm slices
 #     (device + arm64 simulator). Pair with -DCMAKE_SYSTEM_PROCESSOR=<arch> at
 #     configure (build-apple.sh), which is what makes cpuinfo enter the arm branch.
+#   0011-marian-msvc-drop-wx
+#     The MSVC counterpart of 0002: drop /WX from marian's MSVC warning set. MSVC
+#     warns (C4068) on the `#pragma GCC` lines in tensors/cpu/prod_blas.h, which
+#     /WX turns into a hard error. Needed for the Windows target.
+#   0012-ssplit-pcre2-msvc
+#     ssplit's external pcre2 build under MSVC: build Release (the VS generator is
+#     multi-config), use pcre2's MSVC library name with PCRE2_STATIC, and forward
+#     the MSVC runtime choice and CMAKE_POLICY_VERSION_MINIMUM. Windows target.
+#   0013-bergamot-free-shared-model-after-last-replica
+#     TranslationModel::loadBackend() ends with memory_.models.clear(), freeing the
+#     model bytes that every replica loads from (a memory saving for single-threaded
+#     use). With num_workers > 1 each AsyncService worker builds its replica on its
+#     first batch, often concurrently, so one worker freed the buffer while another
+#     still copied weights out of it (use-after-free; the Windows demo crashed in
+#     ~1 of 4 runs on 8 workers). Free it only after the last replica has loaded.
+#     Single-worker behavior is unchanged. All ABIs (multi-worker models).
 #
 # Patches 0002-0004 are needed to build the engine on modern compilers / macOS
 # (the Apple target); 0005-0006 are needed for the x86_64 ABI; 0008-0010 are

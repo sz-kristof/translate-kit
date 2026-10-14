@@ -24,6 +24,7 @@
 // IO thread). HTML-aware translation uses ResponseOptions{ HTML = true }, which
 // performs detag-and-project so inline tags ride along on the alignment.
 
+#include <future>
 #include <sstream>
 #include <stdexcept>
 
@@ -100,8 +101,13 @@ std::shared_ptr<marian::Options> BuildOptions(const ModelSpec& spec) {
     return options;
 }
 
-mb::BlockingService::Config ServiceConfig() {
-    mb::BlockingService::Config config;
+size_t Workers(const ModelSpec& spec) {
+    return static_cast<size_t>(spec.num_workers > 0 ? spec.num_workers : 1);
+}
+
+mb::AsyncService::Config ServiceConfig(size_t workers) {
+    mb::AsyncService::Config config;
+    config.numWorkers = workers;
     config.cacheSize = 0;  // no cross-request cache; the caller owns lifecycle
     return config;
 }
@@ -109,14 +115,16 @@ mb::BlockingService::Config ServiceConfig() {
 }  // namespace
 
 struct Translator::Impl {
-    mb::BlockingService service;
+    // Declared before `service` so it outlives the worker threads, which the
+    // service joins in its destructor.
     std::shared_ptr<mb::TranslationModel> model;
+    // One worker thread per model replica; requests queued together are batched
+    // across sentences by the service's batching pool.
+    mb::AsyncService service;
 
     explicit Impl(const ModelSpec& spec)
-        : service(ServiceConfig()),
-          model(std::make_shared<mb::TranslationModel>(
-              BuildOptions(spec),
-              static_cast<size_t>(spec.num_workers > 0 ? spec.num_workers : 1))) {}
+        : model(std::make_shared<mb::TranslationModel>(BuildOptions(spec), Workers(spec))),
+          service(ServiceConfig(Workers(spec))) {}
 };
 
 Translator::Translator(const ModelSpec& spec) : impl_(new Impl(spec)) {}
@@ -126,22 +134,38 @@ Translator::~Translator() {
 }
 
 TranslationResult Translator::translate(const std::string& input, bool is_html) const {
+    return translateBatch({input}, is_html).front();
+}
+
+std::vector<TranslationResult> Translator::translateBatch(const std::vector<std::string>& inputs,
+                                                          bool is_html) const {
     mb::ResponseOptions options;
     options.HTML = is_html;
     // HTML restore (detag-and-project) projects tags onto the target via word
     // alignments, so request them whenever translating HTML.
     options.alignment = is_html;
 
-    std::vector<std::string> sources{input};
-    std::vector<mb::ResponseOptions> perInput{options};
-    std::vector<mb::Response> responses =
-        impl_->service.translateMultiple(impl_->model, std::move(sources), perInput);
-
-    TranslationResult result;
-    if (!responses.empty()) {
-        result.text = responses.front().target.text;
+    // Queue every input before waiting on any, so the batching pool sees all of
+    // their sentences at once and the workers can share them out. The callbacks
+    // share ownership of the promises: a worker may still be inside set_value()
+    // when this thread wakes up and returns.
+    auto promises = std::make_shared<std::vector<std::promise<mb::Response>>>(inputs.size());
+    std::vector<std::future<mb::Response>> futures;
+    futures.reserve(inputs.size());
+    for (auto& p : *promises) futures.push_back(p.get_future());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        std::string source = inputs[i];
+        impl_->service.translate(
+            impl_->model, std::move(source),
+            [promises, i](mb::Response&& response) { (*promises)[i].set_value(std::move(response)); },
+            options);
     }
-    return result;
+
+    std::vector<TranslationResult> results(inputs.size());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        results[i].text = futures[i].get().target.text;
+    }
+    return results;
 }
 
 }  // namespace translatekit
@@ -167,6 +191,14 @@ TranslationResult Translator::translate(const std::string& input, bool /*is_html
     TranslationResult result;
     result.text = input;  // echo
     return result;
+}
+
+std::vector<TranslationResult> Translator::translateBatch(const std::vector<std::string>& inputs,
+                                                          bool is_html) const {
+    std::vector<TranslationResult> results;
+    results.reserve(inputs.size());
+    for (const std::string& input : inputs) results.push_back(translate(input, is_html));
+    return results;
 }
 
 }  // namespace translatekit

@@ -28,6 +28,7 @@
  *   tk_load_model          -> TranslateKit.loadModel
  *   tk_model_close         -> TranslateKit.unloadModel / TranslationModel.close
  *   tk_translate           -> TranslationModel.translate
+ *   tk_translate_batch     -> TranslationModel.translate (batch overload)
  *
  * Thread-safety: a `tk_context` and the `tk_model`s loaded from it may be used
  * from a single background thread at a time. All calls are BLOCKING; the caller
@@ -47,7 +48,13 @@ extern "C" {
 #endif
 
 #if defined(_WIN32)
-#  define TK_EXPORT __declspec(dllexport)
+   /* Building translatekit.dll, or linking the core statically: export.
+    * Consumers of the DLL define TK_USING_DLL to import instead. */
+#  if defined(TK_USING_DLL)
+#    define TK_EXPORT __declspec(dllimport)
+#  else
+#    define TK_EXPORT __declspec(dllexport)
+#  endif
 #else
 #  define TK_EXPORT __attribute__((visibility("default")))
 #endif
@@ -106,7 +113,7 @@ typedef struct tk_model_spec {
     size_t vocab_count;
     const char* shortlist_path;       /* lex.<...>.s2t.bin */
     const char* config_path;          /* nullable: pre-generated bergamot config */
-    int num_workers;                  /* >= 1 */
+    int num_workers;                  /* >= 1 translation threads for this model */
 } tk_model_spec;
 
 /* ---- API ---------------------------------------------------------------- */
@@ -144,6 +151,17 @@ TK_EXPORT tk_status tk_translate(tk_model* model,
                                  const char* input,
                                  int is_html,
                                  tk_translation_result* out_result);
+
+/* Translate `count` inputs in one call (same order). Prefer this over calling
+ * tk_translate per paragraph: the engine batches sentences across all inputs and
+ * spreads the batches over the model's num_workers threads. `out_results` must
+ * point to `count` structs; on TK_OK every one is filled (free each with
+ * tk_translation_result_free); on error none are. Blocking. */
+TK_EXPORT tk_status tk_translate_batch(tk_model* model,
+                                       const char* const* inputs,
+                                       size_t count,
+                                       int is_html,
+                                       tk_translation_result* out_results);
 
 /* Release the contents of a translation result (its text + quality buffer).
  * Safe to call with a zero-initialized struct. Does not free `result` itself. */

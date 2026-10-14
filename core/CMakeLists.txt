@@ -78,14 +78,21 @@ target_include_directories(cld2 PUBLIC ${CLD2_DIR}/public ${CLD2_INTERNAL})
 # CLD2 is decade-old third-party code; silence its warnings so they don't drown
 # ours, and downgrade the braced-init narrowing that modern clang promotes to a
 # hard error. Keep it position-independent for linking into the shared object.
-target_compile_options(cld2 PRIVATE -w -Wno-c++11-narrowing -Wno-narrowing)
+if(MSVC)
+    # MSVC equivalent: /w silences all warnings; narrowing in braced init is only
+    # a warning (C4838) there, so nothing needs downgrading.
+    target_compile_options(cld2 PRIVATE /w)
+else()
+    target_compile_options(cld2 PRIVATE -w -Wno-c++11-narrowing -Wno-narrowing)
+endif()
 set_target_properties(cld2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # ---- translate-kit core ----------------------------------------------------
 add_library(translatekit_core STATIC
         src/c_api.cpp
         src/language_detector.cpp
-        src/translator.cpp)
+        src/translator.cpp
+        src/utf8.cpp)
 
 # Public: the C ABI header. Private: internal C++ headers under src/.
 target_include_directories(translatekit_core

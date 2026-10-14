@@ -27,13 +27,15 @@
 #include <string>
 
 #include "translate_kit/translate_kit.h"
+#include "utf8_args.h"
 
 int main(int argc, char** argv) {
+    const std::vector<std::string> args = Utf8Args(argc, argv);
     std::string text;
-    if (argc > 1) {
-        for (int i = 1; i < argc; ++i) {
+    if (args.size() > 1) {
+        for (size_t i = 1; i < args.size(); ++i) {
             if (i > 1) text += ' ';
-            text += argv[i];
+            text += args[i];
         }
     } else {
         std::ostringstream ss;
