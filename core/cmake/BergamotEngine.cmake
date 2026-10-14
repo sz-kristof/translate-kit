@@ -77,6 +77,10 @@ function(translatekit_add_engine engine_dir)
     set(SSPLIT_USE_INTERNAL_PCRE2 ON CACHE BOOL "" FORCE)  # build PCRE2 for the target
     set(COMPILE_TESTS OFF CACHE BOOL "" FORCE)
     set(COMPILE_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    # marian defaults USE_DOXYGEN=ON and, when doxygen is installed (it is on the
+    # windows-latest runner), configures Doxyfile.in, which the vendored engine does
+    # not ship: configure fails. We never build the engine's API docs.
+    set(USE_DOXYGEN OFF CACHE BOOL "" FORCE)
 
     # Pin the target CPU so marian never probes the build host. marian defaults
     # BUILD_ARCH=native, which makes it (a) run FindSSE try-compiles against the
