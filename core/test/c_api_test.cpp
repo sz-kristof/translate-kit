@@ -121,6 +121,53 @@ TEST(CApi, DetectLanguageEmptyIsUnknown) {
     tk_shutdown(ctx);
 }
 
+// Caller-supplied bytes are not guaranteed to be UTF-8 (e.g. Latin-1/2 text, or
+// Java's "modified UTF-8" from JNI GetStringUTFChars, which encodes U+0000 as
+// C0 80). CLD2 reads out of bounds on such input unless it is sanitized first;
+// each of these crashed the process before the fix.
+TEST(CApi, DetectLanguageIllFormedUtf8DoesNotCrash) {
+    tk_context* ctx = MakeContext();
+    const char* inputs[] = {
+        "\xF6",
+        "abc\xC0\x80" "def",
+        "Hello world, this is text \xC0\x80 with a NUL from Java.",
+        "Ez egy magyar mondat a b\xF6ng\xE9sz\xF5r\xF5l.",
+        "abc \xC1 def",
+        "abc \xEE def",
+        "abc \xF7 def",
+        "\xC3",
+    };
+    for (const char* in : inputs) {
+        tk_language_result r = {};
+        EXPECT_EQ(tk_detect_language(ctx, in, &r), TK_OK) << in;
+        EXPECT_GE(r.confidence, 0.0f);
+        EXPECT_LE(r.confidence, 1.0f);
+    }
+    tk_shutdown(ctx);
+}
+
+// Unsanitized, these either crash or return garbage (a lone truncated byte came
+// back as "el" with confidence 1.0), depending on what memory CLD2 reads.
+TEST(CApi, DetectLanguageIllFormedUtf8Goldens) {
+    tk_context* ctx = MakeContext();
+    struct Case { const char* text; const char* lang; };
+    const Case cases[] = {
+        {"\xC3", "und"},
+        {"\xF6", "und"},
+        {"abc\xC0\x80" "def", "und"},
+        {"Ez egy magyar mondat a b\xF6ng\xE9sz\xF5r\xF5l.", "hu"},  // Latin-2 bytes
+        {"Das ist ein deutscher Satz \xC3", "de"},
+        {"The quick brown fox jumps over the lazy dog \xF6 while the cat "
+         "sleeps quietly in the warm afternoon sun.", "en"},
+    };
+    for (const Case& c : cases) {
+        tk_language_result r = {};
+        ASSERT_EQ(tk_detect_language(ctx, c.text, &r), TK_OK) << c.text;
+        EXPECT_STREQ(r.language, c.lang) << c.text;
+    }
+    tk_shutdown(ctx);
+}
+
 TEST(CApi, DetectLanguageWithoutContextFails) {
     tk_language_result r = {};
     EXPECT_EQ(tk_detect_language(nullptr, "x", &r), TK_ERR_NOT_INITIALIZED);
@@ -247,6 +294,45 @@ TEST(CApi, TranslateRealModelEnDe) {
 // idempotent-logger engine patch the second load aborts with
 // "logger with name 'general' already exists". The app loads several models per
 // process (e.g. en->es then en->de) and pivoting needs two loaded at once.
+// One ill-formed byte used to make the engine return an EMPTY translation with
+// TK_OK, silently dropping the whole input.
+TEST(CApi, TranslateIllFormedUtf8IsNotDropped) {
+    const char* dir = std::getenv("TK_TEST_MODEL_DIR");
+    if (dir == nullptr || dir[0] == '\0') {
+        GTEST_SKIP() << "set TK_TEST_MODEL_DIR to the ende.student.tiny11 directory";
+    }
+    const std::string d(dir);
+    const std::string model = d + "/model.intgemm.alphas.bin";
+    const std::string vocab = d + "/vocab.deen.spm";
+    const std::string lex = d + "/lex.s2t.bin";
+    const std::string config = d + "/config.intgemm8bitalpha.yml";
+    const char* vocabs[] = {vocab.c_str()};
+
+    tk_context* ctx = MakeContext();
+    tk_model_spec spec = {};
+    spec.source_lang = "en";
+    spec.target_lang = "de";
+    spec.model_path = model.c_str();
+    spec.vocab_paths = vocabs;
+    spec.vocab_count = 1;
+    spec.shortlist_path = lex.c_str();
+    spec.config_path = config.c_str();
+    spec.num_workers = 1;
+    tk_model* m = nullptr;
+    ASSERT_EQ(tk_load_model(ctx, &spec, &m), TK_OK) << tk_last_error();
+
+    const char* inputs[] = {"Hello \xF6 world.", "Hello \xC0\x80" " world."};
+    for (const char* in : inputs) {
+        tk_translation_result r = {};
+        ASSERT_EQ(tk_translate(m, in, /*is_html=*/0, &r), TK_OK) << tk_last_error();
+        ASSERT_NE(r.text, nullptr);
+        EXPECT_NE(std::string(r.text).find("Welt"), std::string::npos) << r.text;
+        tk_translation_result_free(&r);
+    }
+    tk_model_close(m);
+    tk_shutdown(ctx);
+}
+
 TEST(CApi, LoadMultipleModelsInOneProcess) {
     const char* dir = std::getenv("TK_TEST_MODEL_DIR");
     if (dir == nullptr || dir[0] == '\0') {

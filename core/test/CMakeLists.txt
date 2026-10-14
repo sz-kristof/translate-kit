@@ -23,8 +23,10 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(translatekit_core_test c_api_test.cpp)
+add_executable(translatekit_core_test c_api_test.cpp utf8_test.cpp)
 target_link_libraries(translatekit_core_test PRIVATE translatekit_core GTest::gtest_main)
+# utf8_test exercises an internal helper directly.
+target_include_directories(translatekit_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src)
 # Absolute path to the repo-root VERSION file, so VersionMatchesVersionFile can
 # read it at run time regardless of the working directory the test runs from.
 target_compile_definitions(translatekit_core_test

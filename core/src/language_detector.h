@@ -33,6 +33,7 @@ class LanguageDetector {
 public:
     LanguageDetector() = default;
 
+    // `text` is UTF-8; ill-formed sequences are treated as U+FFFD.
     DetectedLanguage detect(const std::string& text) const;
 };
 

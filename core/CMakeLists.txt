@@ -85,7 +85,8 @@ set_target_properties(cld2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(translatekit_core STATIC
         src/c_api.cpp
         src/language_detector.cpp
-        src/translator.cpp)
+        src/translator.cpp
+        src/utf8.cpp)
 
 # Public: the C ABI header. Private: internal C++ headers under src/.
 target_include_directories(translatekit_core

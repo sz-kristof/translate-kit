@@ -18,11 +18,16 @@
 
 #include "compact_lang_det.h"  // CLD2::ExtDetectLanguageSummary, CLD2::Language
 #include "lang_script.h"       // CLD2::LanguageCode
+#include "utf8.h"
 
 namespace translatekit {
 
-DetectedLanguage LanguageDetector::detect(const std::string& text) const {
-    if (text.empty()) return DetectedLanguage{"und", 0.0f};
+DetectedLanguage LanguageDetector::detect(const std::string& raw) const {
+    if (raw.empty()) return DetectedLanguage{"und", 0.0f};
+
+    // CLD2's ExtDetectLanguageSummary trusts its input to be valid UTF-8 and
+    // reads past its lookup tables otherwise, so never hand it raw bytes.
+    const std::string text = SanitizeUtf8(raw);
 
     bool is_reliable = false;
     CLD2::Language top3[3] = {CLD2::UNKNOWN_LANGUAGE, CLD2::UNKNOWN_LANGUAGE,

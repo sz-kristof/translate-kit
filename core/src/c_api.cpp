@@ -29,6 +29,7 @@
 
 #include "language_detector.h"
 #include "translator.h"
+#include "utf8.h"
 
 namespace {
 
@@ -183,8 +184,10 @@ tk_status tk_translate(tk_model* model,
         return TK_ERR_INVALID_ARG;
     }
     try {
+        // A single ill-formed byte makes the engine drop the whole input and
+        // return an empty translation, so repair it to U+FFFD first.
         translatekit::TranslationResult r =
-            model->translator.translate(std::string(input), is_html != 0);
+            model->translator.translate(translatekit::SanitizeUtf8(input), is_html != 0);
         out_result->text = dup_cstr(r.text);
         if (out_result->text == nullptr) {
             set_error("tk_translate: out of memory");
